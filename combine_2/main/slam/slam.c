@@ -33,7 +33,13 @@ static volatile bool is_optimizing = false;
 /* Loop closures: only poses at least this many nodes apart, and only the
  * single closest candidate per pose, so one revisit adds one constraint. */
 #define LOOP_MIN_NODE_GAP      5
-#define LOOP_MAX_DIST_M        1.0f
+#define LOOP_MAX_DIST_M        1.5f
+/* Max pose correction ICP may apply. Logged PX4 positions were off by up to
+ * 0.9 m (headings by <15°), so the old 0.30/0.40 m gates rejected exactly the
+ * corrections SLAM exists to make. The inlier-ratio check is the real guard. */
+#define ICP_MAX_ROT_RAD        0.35f
+#define ICP_MAX_TRANS_M        1.0f
+#define ICP_ITERATIONS         30
 #define LOOP_MAX_DYAW_RAD      0.8f
 
 static void log_slam_memory(const char *phase) {
@@ -65,7 +71,7 @@ static bool comp_constr(icp_points_t *ref_scan, icp_points_t *cur_scan,
   float icp_rot = 0;
   ESP_LOGD(TAG, "Starting ICP matching (%d pts vs %d pts)", (int)ref_scan->num,
            (int)cur_scan->num);
-  icp(ref_scan, cur_scan, 15, 0.6f, &icp_tr, &icp_rot);
+  icp(ref_scan, cur_scan, ICP_ITERATIONS, 0.6f, &icp_tr, &icp_rot);
   ESP_LOGD(TAG, "ICP result: T=(%.2f, %.2f) R=%.2f rad", icp_tr.x, icp_tr.y,
            icp_rot);
 
@@ -184,7 +190,7 @@ void run_slam(void) {
 
       constraint cons;
       if (comp_constr(ref_cloud, cur_cloud, poses[j], poses[i],
-                      (int16_t)j, (int16_t)i, 0.18f, 0.30f, &cons)) {
+                      (int16_t)j, (int16_t)i, ICP_MAX_ROT_RAD, ICP_MAX_TRANS_M, &cons)) {
         constraints[num_constraints++] = cons;
         vTaskDelay(pdMS_TO_TICKS(1));
       }
@@ -224,7 +230,7 @@ void run_slam(void) {
 
       constraint cons;
       if (comp_constr(ref_cloud, cur_cloud, poses[j], poses[i],
-                      (int16_t)j, (int16_t)i, 0.22f, 0.40f, &cons)) {
+                      (int16_t)j, (int16_t)i, ICP_MAX_ROT_RAD, ICP_MAX_TRANS_M, &cons)) {
         constraints[num_constraints++] = cons;
         vTaskDelay(pdMS_TO_TICKS(1));
       }

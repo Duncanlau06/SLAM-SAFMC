@@ -17,5 +17,6 @@
     "--query-driver=**",
     "--compile-commands-dir=c:\\Users\\Duncan\\Downloads\\safmc\\eth slam\\build"
   ],
-  "idf.port": "COM4"
+  "idf.port": "COM4",
+  "cmake.sourceDirectory": "C:/Users/Duncan/Downloads/safmc/eth slam/combine"
 }
