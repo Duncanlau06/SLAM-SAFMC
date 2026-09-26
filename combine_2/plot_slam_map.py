@@ -9,6 +9,10 @@ Usage:
 
     # 3. Plot from saved dataset or file:
     python plot_slam_map.py [flight_log.txt]
+
+    # Add --points to overlay the raw ToF points on the drone-built occupancy grid.
+    # The map itself is computed on the drone (main/slam/occ_grid.c); logs from
+    # older firmware without a grid still plot as a point cloud.
 """
 
 import os
@@ -68,12 +72,58 @@ def parse_raw_poses(text):
     return [{"id": i, "x": float(m[0]), "y": float(m[1]), "yaw": float(m[2])}
             for i, m in enumerate(re.findall(r'\[\s*([-\d\.]+)\s*,\s*([-\d\.]+)\s*,\s*([-\d\.]+)\s*\]', match.group(1)))]
 
+LOG_PREFIX_RE = re.compile(r'^[IEWDV]\s+\(\d+\)\s+[\w_]+:\s*')
+GRID_ROW_RE = re.compile(r'^(?:\d+[ufo])+$')
+GRID_UNKNOWN, GRID_FREE, GRID_OCC = 0, 1, 2
+
+def parse_grid(text):
+    """Occupancy grid built on the drone by occ_grid.c: a JSON header line, then
+    one run-length-encoded row per line ("12u40f3o" = 12 unknown, 40 free,
+    3 occupied). Row = north index, col = east index. Returns the header dict
+    plus "rle" rows (kept encoded so slam_map.json stays small), or None."""
+    match = re.search(r'=== SLAM_GRID_START ===(.*?)=== SLAM_GRID_END ===', text or "", re.DOTALL)
+    if not match:
+        return None
+    header, rows = None, []
+    for line in match.group(1).splitlines():
+        line = LOG_PREFIX_RE.sub('', line.strip()).strip()
+        if header is None and line.startswith('{'):
+            try:
+                header = json.loads(line)
+            except ValueError:
+                return None
+        elif GRID_ROW_RE.match(line):
+            rows.append(line)
+    if header is None or not rows:
+        return None
+    if len(rows) != header["rows"]:
+        print(f"Grid note: expected {header['rows']} rows, got {len(rows)} (serial dropout?)")
+    header["rle"] = rows
+    return header
+
+def decode_grid(grid):
+    """Expands a parse_grid() result into a (rows, cols) uint8 array of GRID_* values."""
+    code = {"u": GRID_UNKNOWN, "f": GRID_FREE, "o": GRID_OCC}
+    out = np.zeros((grid["rows"], grid["cols"]), dtype=np.uint8)
+    for r, row in enumerate(grid["rle"][:grid["rows"]]):
+        c = 0
+        for count, sym in re.findall(r'(\d+)([ufo])', row):
+            n = int(count)
+            out[r, c:c + n] = code[sym]
+            c += n
+    return out
+
 def parse_slam_data(text):
     data = _parse_slam_map(text)
+    grid = parse_grid(text)
+    if data is None and grid is not None:
+        data = {"poses": [], "scans": []}
     if data is not None and "raw_poses" not in data:
         raw = parse_raw_poses(text)
         if raw:
             data["raw_poses"] = raw
+    if data is not None and grid is not None:
+        data["grid"] = grid
     return data
 
 def _parse_slam_map(text):
@@ -171,17 +221,37 @@ def _parse_slam_map(text):
 
     return None
 
-def plot_slam_map(data, output_file="image_test_1.2.png", title="Image Test 1.2 - 2D SLAM Map", show_gui=True):
+def plot_slam_map(data, output_file="image_test_1.2.png", title="Image Test 1.2 - 2D SLAM Map", show_gui=True,
+                  show_points=False):
     poses = data.get("poses", [])
-    scans = data.get("scans", [])
+    grid = data.get("grid")
+    # With a drone-built grid the raw points are debug-only (--points)
+    scans = data.get("scans", []) if (grid is None or show_points) else []
 
-    if not poses and not scans:
+    if not poses and not scans and grid is None:
         print("No SLAM data found to plot.")
         return
 
     plt.figure(figsize=(9, 9), facecolor="#1e1e1e")
     ax = plt.gca()
     ax.set_facecolor("#121212")
+
+    # 0. Occupancy grid built on the drone (occ_grid.c): this is the map
+    if grid is not None:
+        from matplotlib.colors import ListedColormap
+        from matplotlib.patches import Patch
+        cells = decode_grid(grid)
+        res = grid["res"]
+        extent = [grid["y0"], grid["y0"] + grid["cols"] * res,   # East
+                  grid["x0"], grid["x0"] + grid["rows"] * res]   # North
+        cmap = ListedColormap(["#121212", "#2b3a4d", "#00ffcc"])  # unknown, free, occupied
+        ax.imshow(cells, origin="lower", extent=extent, cmap=cmap, vmin=0, vmax=2,
+                  interpolation="nearest", zorder=1)
+        n_occ = int(np.sum(cells == GRID_OCC))
+        ax.add_artist(ax.legend(handles=[
+            Patch(color="#00ffcc", label=f"Occupied ({n_occ} cells, {res * 100:.0f} cm)"),
+            Patch(color="#2b3a4d", label="Free space")],
+            facecolor="#222222", edgecolor="#444444", labelcolor="white", loc="lower right"))
 
     # 1. Plot 2D obstacle point cloud from ToF scans
     pose_map = {p["id"]: p for p in poses}
@@ -202,13 +272,15 @@ def plot_slam_map(data, output_file="image_test_1.2.png", title="Image Test 1.2 
 
     # Space each beam passed through before hitting something is known-free;
     # shading it shows the room's open floor, not just the wall hits.
-    if free_rays:
+    if free_rays and grid is None:
         from matplotlib.collections import LineCollection
         ax.add_collection(LineCollection(free_rays, colors="#3a6ea5", linewidths=0.6, alpha=0.08, zorder=2))
         ax.plot([], [], color="#3a6ea5", linewidth=3, alpha=0.6, label="Observed free space")
 
     if all_pts_x:
-        ax.scatter(all_pts_x, all_pts_y, s=16, c="#00ffcc", alpha=0.75, label=f"ToF Obstacle Points ({len(all_pts_x)} pts)", zorder=3)
+        # Over a grid, draw points small and distinct so they can be checked against it
+        style = dict(s=4, c="#ff66cc", alpha=0.6) if grid is not None else dict(s=16, c="#00ffcc", alpha=0.75)
+        ax.scatter(all_pts_x, all_pts_y, label=f"ToF Obstacle Points ({len(all_pts_x)} pts)", zorder=3, **style)
 
     # 2. Plot raw odometry trajectory (before LS-SLAM) for comparison
     raw_poses = data.get("raw_poses", [])
@@ -259,7 +331,10 @@ def plot_slam_map(data, output_file="image_test_1.2.png", title="Image Test 1.2 
         except Exception:
             pass
 
-def listen_serial(port="COM4", baudrate=115200, output_file="image_test_1.2.png", show_gui=True):
+GRID_WAIT_S = 5.0  # after SLAM_MAP_JSON_END, how long to wait for the grid (old firmware sends none)
+
+def listen_serial(port="COM4", baudrate=115200, output_file="image_test_1.2.png", show_gui=True,
+                  show_points=False):
     """Listens live to the ESP32 on COM port and automatically plots & saves upon landing."""
     import serial
     print(f"Connecting to ESP32 on {port} @ {baudrate} baud...")
@@ -282,33 +357,59 @@ def listen_serial(port="COM4", baudrate=115200, output_file="image_test_1.2.png"
 
     print(f"Connected to {port}! (Streaming live... press Enter at any time to generate plot from current data)\n")
     buffer = []
-    capturing_json = False
-    json_lines = []
+    capturing = None   # "json" or "grid" while inside a block
+    block_lines = []
+    pending = None     # map JSON received, waiting for the grid that follows it
+    pending_since = 0.0
+    pending_lock = threading.Lock()
 
     import queue
     plot_queue = queue.Queue()
 
+    def finish(data):
+        print("\n[!] Received complete SLAM dataset from drone!")
+        save_dataset_to_laptop(data)
+        plot_queue.put(data)
+
     def handle_line(line):
-        nonlocal capturing_json
+        nonlocal capturing, pending, pending_since
         print(line, end="")
-        if "=== SLAM_MAP_JSON_START ===" in line:
-            capturing_json = True
-            json_lines.clear()
-            json_lines.append(line)
-        elif "=== SLAM_MAP_JSON_END ===" in line:
-            capturing_json = False
-            json_lines.append(line)
-            full_text = "".join(json_lines)
-            data = parse_slam_data(full_text)
-            if data:
-                raw = parse_raw_poses("".join(buffer))
-                if raw:
-                    data["raw_poses"] = raw
-                print("\n[!] Received complete SLAM dataset from drone!")
-                save_dataset_to_laptop(data)
-                plot_queue.put(data)
-        elif capturing_json:
-            json_lines.append(line)
+        for kind, tag in (("json", "SLAM_MAP_JSON"), ("grid", "SLAM_GRID")):
+            if f"=== {tag}_START ===" in line:
+                capturing = kind
+                block_lines.clear()
+                block_lines.append(line)
+                return
+            if f"=== {tag}_END ===" in line and capturing == kind:
+                capturing = None
+                block_lines.append(line)
+                text = "".join(block_lines)
+                with pending_lock:
+                    if kind == "json":
+                        data = parse_slam_data(text)
+                        if data:
+                            raw = parse_raw_poses("".join(buffer))
+                            if raw:
+                                data["raw_poses"] = raw
+                            pending, pending_since = data, time.time()
+                    else:
+                        grid = parse_grid(text)
+                        if grid:
+                            data = pending or {"poses": [], "scans": []}
+                            data["grid"] = grid
+                            pending = None
+                            finish(data)
+                return
+        if capturing:
+            block_lines.append(line)
+
+    def flush_stale_pending():
+        """Old firmware sends no grid: plot the points alone after GRID_WAIT_S."""
+        nonlocal pending
+        with pending_lock:
+            if pending is not None and capturing != "grid" and time.time() - pending_since > GRID_WAIT_S:
+                data, pending = pending, None
+                finish(data)
 
     def read_loop():
         while True:
@@ -349,10 +450,12 @@ def listen_serial(port="COM4", baudrate=115200, output_file="image_test_1.2.png"
 
     try:
         while t.is_alive():
+            flush_stale_pending()
             try:
                 data = plot_queue.get(timeout=0.2)
                 # Execute GUI plot on the MAIN thread to avoid Matplotlib thread warnings
-                plot_slam_map(data, output_file, title="Image Test 1.2 - 2D SLAM Map", show_gui=show_gui)
+                plot_slam_map(data, output_file, title="Image Test 1.2 - 2D SLAM Map", show_gui=show_gui,
+                              show_points=show_points)
                 if sys.platform == "win32" and output_file and os.path.exists(output_file):
                     try:
                         os.startfile(output_file)
@@ -379,6 +482,7 @@ def get_clipboard_text():
 if __name__ == "__main__":
     output_filename = "image_test_1.2.png"
     show_gui = "--no-gui" not in sys.argv
+    show_points = "--points" in sys.argv  # overlay raw ToF points on the drone's grid map
 
     port = None
     if "--port" in sys.argv:
@@ -391,7 +495,7 @@ if __name__ == "__main__":
         port = "COM4"
 
     if port:
-        listen_serial(port=port, output_file=output_filename, show_gui=show_gui)
+        listen_serial(port=port, output_file=output_filename, show_gui=show_gui, show_points=show_points)
         sys.exit(0)
 
     content = ""
@@ -403,7 +507,7 @@ if __name__ == "__main__":
             try:
                 with open(filename, "r", encoding=enc) as f:
                     test_c = f.read()
-                    if "SLAM_MAP_JSON" in test_c or "swarm_graph" in test_c or "Pose [" in test_c:
+                    if "SLAM_MAP_JSON" in test_c or "SLAM_GRID" in test_c or "swarm_graph" in test_c or "Pose [" in test_c:
                         content = test_c
                         break
                     elif not content:
@@ -413,7 +517,7 @@ if __name__ == "__main__":
     else:
         # Check clipboard
         clip = get_clipboard_text()
-        if "=== SLAM_MAP_JSON_START ===" in clip or "=== SWARM GRAPH" in clip or "Pose [" in clip:
+        if "=== SLAM_MAP_JSON_START ===" in clip or "=== SLAM_GRID_START ===" in clip or "=== SWARM GRAPH" in clip or "Pose [" in clip:
             print("Auto-detected SLAM data in clipboard!")
             content = clip
         elif (DATA_DIR / "slam_map.json").exists():
@@ -428,6 +532,7 @@ if __name__ == "__main__":
     if data:
         print(f"Extracted {len(data.get('poses', []))} poses and {len(data.get('scans', []))} point cloud scans.")
         save_dataset_to_laptop(data)
-        plot_slam_map(data, output_filename, title="Image Test 1.2 - 2D SLAM Map", show_gui=show_gui)
+        plot_slam_map(data, output_filename, title="Image Test 1.2 - 2D SLAM Map", show_gui=show_gui,
+                      show_points=show_points)
     else:
         print("Could not find SLAM graph output in the provided input.")

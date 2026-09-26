@@ -83,6 +83,12 @@ typedef struct {
 // ---------------------------------------------------------------------------
 static setpoint_t    s_sp;
 static drone_state_t s_state;
+
+/* A position step this far beyond velocity * dt between consecutive 20 Hz
+ * LOCAL_POSITION_NED samples is a PX4 estimator reset, not motion. Normal
+ * prediction error is a few cm; 0.25 m in 50 ms would be 5 m/s. */
+#define POS_JUMP_MIN_M  0.25f
+static uint32_t s_prev_pos_boot_ms;
 static uint32_t      s_sp_update_ms;   // timestamp of last setpoint update
 
 static SemaphoreHandle_t s_sp_mutex;
@@ -350,6 +356,28 @@ static void parse_incoming(void)
                 mavlink_msg_local_position_ned_decode(&msg, &pos);
 
                 xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+                /* Detect PX4 estimator position resets: a step between two
+                 * 20 Hz samples far larger than the reported velocity allows.
+                 * Replace the step with velocity * dt in the jump-free SLAM
+                 * position, so SLAM never sees the jump. x/y stay raw PX4,
+                 * since navigation setpoints are in PX4's frame. */
+                if (s_state.last_pos_ms != 0) {
+                    float dt = (float)(pos.time_boot_ms - s_prev_pos_boot_ms) / 1000.0f;
+                    if (dt <= 0.0f || dt > 0.5f) dt = 0.05f;
+                    float step_x = pos.x - s_state.x, step_y = pos.y - s_state.y;
+                    float exp_x = pos.vx * dt, exp_y = pos.vy * dt;
+                    float err = hypotf(step_x - exp_x, step_y - exp_y);
+                    if (err > POS_JUMP_MIN_M) {
+                        s_state.slam_off_x += step_x - exp_x;
+                        s_state.slam_off_y += step_y - exp_y;
+                        s_state.pos_resets++;
+                        ESP_LOGW(TAG, "PX4 position jump of %.2f m (N%+.2f E%+.2f) removed from SLAM odometry (#%u)",
+                                 err, step_x - exp_x, step_y - exp_y, (unsigned)s_state.pos_resets);
+                    }
+                }
+                s_prev_pos_boot_ms = pos.time_boot_ms;
+                s_state.slam_x = pos.x - s_state.slam_off_x;
+                s_state.slam_y = pos.y - s_state.slam_off_y;
                 s_state.x  = pos.x;   s_state.y  = pos.y;   s_state.z  = pos.z;
                 s_state.vx = pos.vx;  s_state.vy = pos.vy;  s_state.vz = pos.vz;
                 s_state.enu_z     = -pos.z;   // NED z-down → ENU z-up
@@ -368,6 +396,7 @@ static void parse_incoming(void)
 
                 xSemaphoreTake(s_state_mutex, portMAX_DELAY);
                 s_state.heading     = heading;
+                s_state.yaw_rate    = att.yawspeed;
                 s_state.last_att_ms = now_ms;
                 xSemaphoreGive(s_state_mutex);
                 break;

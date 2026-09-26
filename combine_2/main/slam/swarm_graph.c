@@ -178,6 +178,7 @@ void swarm_graph_debug_print(void) {
                (i + 1 < num_poses) ? "," : "");
     }
     printf("],\"scans\":[\n");
+#if SLAM_EXPORT_POINTS
     POINTS_STATIC_ALLOC(cloud, POINTS_IN_SCAN)
     for (size_t i = 0; i < num_scans; i++) {
         float px = 0.0f, py = 0.0f, pyaw = 0.0f;
@@ -200,6 +201,7 @@ void swarm_graph_debug_print(void) {
         fflush(stdout);
         vTaskDelay(pdMS_TO_TICKS(5)); /* Yield to FreeRTOS IDLE task to prevent task watchdog triggers */
     }
+#endif
     printf("]}\n");
     printf("=== SLAM_MAP_JSON_END ===\n");
     fflush(stdout);

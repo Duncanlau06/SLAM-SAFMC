@@ -1,5 +1,7 @@
 #include "odom.h"
 #include "mavlink_task.h"   /* mavlink_get_state() */
+#include "app_config.h"
+#include "slam_bridge.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -168,12 +170,23 @@ uint16_t odom_reloc_age_s(void)
  * Frame conversion
  * --------------------------------------------------------------------------- */
 
+/* With SLAM_CORRECT_NAV, "odom" here is still raw PX4 (what setpoints use),
+ * and the chain is:
+ *   PX4 odom --(minus detected estimator resets)--> jump-free odom
+ *            --(SLAM correction, slam_bridge)-->     SLAM map
+ *            --(+ start offset / tag drift)-->       arena map
+ * Navigation converts its map-frame goal every tick, so it follows both SLAM
+ * corrections and PX4 resets immediately. */
 void odom_to_map(float odom_x, float odom_y, float *map_x, float *map_y)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     float ox = s_offset_x;
     float oy = s_offset_y;
     xSemaphoreGive(s_mutex);
+#if SLAM_CORRECT_NAV
+    drone_state_t st = mavlink_get_state();
+    slam_bridge_odom_to_map(odom_x - st.slam_off_x, odom_y - st.slam_off_y, &odom_x, &odom_y);
+#endif
     *map_x = odom_x + ox;
     *map_y = odom_y + oy;
 }
@@ -186,4 +199,10 @@ void map_to_odom(float map_x, float map_y, float *odom_x, float *odom_y)
     xSemaphoreGive(s_mutex);
     *odom_x = map_x - ox;
     *odom_y = map_y - oy;
+#if SLAM_CORRECT_NAV
+    slam_bridge_map_to_odom(*odom_x, *odom_y, odom_x, odom_y);
+    drone_state_t st = mavlink_get_state();
+    *odom_x += st.slam_off_x;
+    *odom_y += st.slam_off_y;
+#endif
 }

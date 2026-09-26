@@ -155,12 +155,17 @@ static void mission_task(void *arg) {
   /* ------------------------------------------------------------------ */
   ESP_LOGI(TAG, "Autonomous patrol mode (WiFi and AprilTag disabled)...");
 
-  /* Multi-waypoint loop patrol to collect rich 360 point cloud SLAM data */
+  /* Multi-waypoint loop patrol to collect rich 360 point cloud SLAM data.
+   * Goals are in the map frame: takeoff_x/y are raw PX4 (used for the takeoff
+   * setpoint), which differs from the map once SLAM corrections or PX4
+   * position resets have been applied. */
+  float home_x, home_y;
+  odom_to_map(takeoff_x, takeoff_y, &home_x, &home_y);
   float waypoints[4][2] = {
-      {takeoff_x + GOAL_OFFSET_X_M, takeoff_y + GOAL_OFFSET_Y_M},
-      {takeoff_x + GOAL_OFFSET_X_M, takeoff_y},
-      {takeoff_x, takeoff_y + GOAL_OFFSET_Y_M},
-      {takeoff_x, takeoff_y}
+      {home_x + GOAL_OFFSET_X_M, home_y + GOAL_OFFSET_Y_M},
+      {home_x + GOAL_OFFSET_X_M, home_y},
+      {home_x, home_y + GOAL_OFFSET_Y_M},
+      {home_x, home_y}
   };
   int current_wp_idx = 0;
 

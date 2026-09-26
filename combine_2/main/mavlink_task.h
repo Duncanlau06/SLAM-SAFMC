@@ -40,6 +40,15 @@ typedef struct {
     // Heading: radians, 0 = North, clockwise positive (from ATTITUDE)
     float heading;
 
+    // Yaw rate: rad/s, clockwise positive (ATTITUDE.yawspeed)
+    float yaw_rate;
+
+    // Jump-free position for SLAM: raw x/y minus every PX4 estimator reset
+    // detected so far (slam_off_*). Use x/y for navigation, slam_x/y for maps.
+    float slam_x, slam_y;
+    float slam_off_x, slam_off_y;
+    uint16_t pos_resets;
+
     // Derived ENU-Z for altitude controller convenience (= -z)
     float enu_z;
 

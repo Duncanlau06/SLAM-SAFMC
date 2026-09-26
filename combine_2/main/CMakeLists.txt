@@ -22,6 +22,7 @@ idf_component_register(
         "slam/swarm_graph.c"
         "slam/swarm_comm.c"
         "slam/slam.c"
+        "slam/occ_grid.c"
     INCLUDE_DIRS
         "."
         "slam"

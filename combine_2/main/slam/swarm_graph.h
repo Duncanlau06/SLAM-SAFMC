@@ -16,6 +16,11 @@ typedef struct scan scan_t;
 #define GRAPH_POSE_MAX_EDGES    8
 #define GRAPH_MAX_POSES         64
 
+/* 1 = also export every scan's world-frame points in the SLAM_MAP_JSON block
+ * (~320 KB, for debugging with `plot_slam_map.py --points`). 0 = poses only;
+ * the map itself comes from the occupancy grid (occ_grid.c). */
+#define SLAM_EXPORT_POINTS      1
+
 typedef union {
     uint16_t raw;
     struct {

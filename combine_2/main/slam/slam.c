@@ -127,23 +127,24 @@ static bool comp_constr(icp_points_t *ref_scan, icp_points_t *cur_scan,
 
 #define SLAM_MAX_CONSTRAINTS 64
 
-void run_slam(void) {
+size_t slam_optimize(float poses[GRAPH_MAX_POSES][3]) {
   is_optimizing = true;
   uint64_t t_start_us = esp_timer_get_time();
 
+  /* Snapshot of the pose count: poses recorded while this runs (in flight)
+   * are left alone here and re-anchored by the caller on commit. */
   size_t total_poses = swarm_graph_get_pose_count();
   if (total_poses < 2) {
     ESP_LOGW(TAG, "Not enough poses in graph (%d) to run SLAM",
              (int)total_poses);
     is_optimizing = false;
-    return;
+    return 0;
   }
 
   if (total_poses > GRAPH_MAX_POSES) {
     total_poses = GRAPH_MAX_POSES;
   }
 
-  float poses[GRAPH_MAX_POSES][3];
   uint8_t skip[GRAPH_MAX_POSES] = {0};
   constraint constraints[SLAM_MAX_CONSTRAINTS];
   size_t num_constraints = 0;
@@ -164,7 +165,7 @@ void run_slam(void) {
     }
   }
 
-  // Allocate memory for scans and point clouds. Static (run_slam is never
+  // Allocate memory for scans and point clouds. Static (slam_optimize is never
   // re-entered) to keep ~7 KB off the stack now that all 8 sensors are used;
   // `static` binds to the macro's first statement, the backing buffer.
   static scan_t ref_scan;
@@ -192,8 +193,8 @@ void run_slam(void) {
       if (comp_constr(ref_cloud, cur_cloud, poses[j], poses[i],
                       (int16_t)j, (int16_t)i, ICP_MAX_ROT_RAD, ICP_MAX_TRANS_M, &cons)) {
         constraints[num_constraints++] = cons;
-        vTaskDelay(pdMS_TO_TICKS(1));
       }
+      vTaskDelay(pdMS_TO_TICKS(1)); /* yield after every ICP: runs in flight too */
     }
   }
 
@@ -232,8 +233,8 @@ void run_slam(void) {
       if (comp_constr(ref_cloud, cur_cloud, poses[j], poses[i],
                       (int16_t)j, (int16_t)i, ICP_MAX_ROT_RAD, ICP_MAX_TRANS_M, &cons)) {
         constraints[num_constraints++] = cons;
-        vTaskDelay(pdMS_TO_TICKS(1));
       }
+      vTaskDelay(pdMS_TO_TICKS(1));
     }
   }
 
@@ -251,8 +252,13 @@ void run_slam(void) {
   ESP_LOGI(TAG, "LS-SLAM Optimization completed in %u ms",
            (unsigned int)t_elapsed_ms);
 
-  // Save optimized poses back into graph and broadcast
-  for (size_t i = 0; i < total_poses; i++) {
+  is_optimizing = false;
+  return total_poses;
+}
+
+void slam_commit_poses(const float poses[GRAPH_MAX_POSES][3], size_t n) {
+  swarm_pose_t p;
+  for (size_t i = 0; i < n; i++) {
     p.id.drone_id = swarm_id;
     p.id.node_id = (uint16_t)i;
     if (swarm_graph_load_pose(&p)) {
@@ -263,24 +269,6 @@ void run_slam(void) {
       swarm_comm_broadcast_pose(p.id);
     }
   }
-
-  is_optimizing = false;
-}
-
-static void slam_background_task(void *pvParameters) {
-  run_slam();
-  vTaskDelete(NULL);
-}
-
-void slam_trigger_optimization(void) {
-  if (is_optimizing) {
-    ESP_LOGW(TAG, "SLAM optimization already running");
-    return;
-  }
-  // Launch on Core 0 with 40KB stack — SLAM puts ~30KB on the stack
-  // Pinned to Core 0 to avoid starving nav_task/mission_task on Core 1
-  xTaskCreatePinnedToCore(slam_background_task, "slam_opt", 40960, NULL, 1,
-                          NULL, 0);
 }
 
 bool slam_is_optimizing(void) { return is_optimizing; }

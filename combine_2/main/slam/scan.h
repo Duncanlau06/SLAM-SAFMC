@@ -23,6 +23,17 @@
 #define SCAN_TIME_MS    400
 /* ~20% of the logged points were at 0.2-0.4 m (prop guards / chassis). */
 #define SCAN_MIN_VALID_MM 300
+/* Beams are ~30 cm wide at 3 m; far readings were the noisiest. Separate from
+ * TOF_MAX_VALID_MM, which obstacle avoidance uses. */
+#define SCAN_MAX_VALID_MM 2500
+/* Drop a sensor frame measured this long before the pose it is attached to */
+#define SCAN_MAX_FRAME_AGE_MS 100
+/* ...or if the drone turned more than this (~3°, half a column) since then */
+#define SCAN_MAX_YAW_ERR_RAD 0.05f
+/* Centre rows that must be valid and agree for a column to count, which
+ * rejects mixed pixels where a beam straddles an edge */
+#define SCAN_MIN_ROWS 2
+#define SCAN_MAX_ROW_SPREAD_MM 100
 
 typedef struct {
     int16_t dists[SCAN_NUM_DIRS][8];

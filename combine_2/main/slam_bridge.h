@@ -34,9 +34,11 @@ bool slam_bridge_record_step(void);
 
 /**
  * @brief Record a SLAM pose vertex with explicitly provided coordinates.
+ * Every SLAM_INFLIGHT_EVERY_N poses this also starts a background
+ * optimisation on core 0.
  *
- * @param x_m North coordinate in meters (NED frame)
- * @param y_m East coordinate in meters (NED frame)
+ * @param x_m North coordinate in meters (jump-free odometry, NED frame)
+ * @param y_m East coordinate in meters (jump-free odometry, NED frame)
  * @param yaw_rad Heading in radians (clockwise from North, [0, 2*pi))
  * @return true if node and scan were successfully stored, false if graph full.
  */
@@ -55,6 +57,14 @@ void slam_bridge_run_optimization(void);
  * point clouds as structured JSON over UART for real-time visualization.
  */
 void slam_bridge_export_json(void);
+
+/**
+ * @brief Convert between jump-free odometry (drone_state_t.slam_x/y) and the
+ * SLAM map frame using the latest committed correction. Thread-safe and
+ * non-blocking; used by odom.c so navigation follows SLAM corrections.
+ */
+void slam_bridge_odom_to_map(float odom_x, float odom_y, float *map_x, float *map_y);
+void slam_bridge_map_to_odom(float map_x, float map_y, float *odom_x, float *odom_y);
 
 /**
  * @brief Get the total number of poses recorded in the current mission.
