@@ -1,22 +1,23 @@
 {
-  "idf.currentSetup": "C:\\esp\\v5.5.5\\esp-idf",
+  "idf.currentSetup": "/Users/duncanlau/esp/esp-idf",
   "idf.openOcdConfigs": [
-    "board/esp32-wrover-kit-3.3v.cfg"
+    "board/esp32s3-builtin.cfg"
   ],
   "idf.customExtraVars": {
-    "OPENOCD_SCRIPTS": "C:/Espressif/tools/openocd-esp32/v0.12.0-esp32-20260424/openocd-esp32/share/openocd/scripts",
+    "OPENOCD_SCRIPTS": "/Users/duncanlau/.espressif/tools/openocd-esp32/v0.12.0-esp32-20260424/openocd-esp32/share/openocd/scripts",
     "IDF_CCACHE_ENABLE": "1",
-    "IDF_PATH": "C:/esp/v5.5.5/esp-idf",
-    "IDF_TOOLS_PATH": "C:/Espressif/tools",
-    "IDF_PYTHON_ENV_PATH": "C:/Espressif/tools/python/v5.5.5/venv",
-    "ESP_ROM_ELF_DIR": "C:/Espressif/tools/esp-rom-elfs/20241011/"
+    "IDF_PATH": "/Users/duncanlau/esp/esp-idf",
+    "IDF_TOOLS_PATH": "/Users/duncanlau/.espressif",
+    "IDF_PYTHON_ENV_PATH": "/Users/duncanlau/.espressif/python_env/idf5.5_py3.9_env",
+    "ESP_ROM_ELF_DIR": "/Users/duncanlau/.espressif/tools/esp-rom-elfs/20241011/",
+    "OPENOCD_USB_ADAPTER_LOCATION": "1-1"
   },
-  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.path": "/Users/duncanlau/.espressif/tools/esp-clangd/esp-21.1.3_20260408/esp-clangd/bin/clangd",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\Users\\Duncan\\Downloads\\safmc\\eth slam\\build"
+    "--compile-commands-dir=/Users/duncanlau/Downloads/safmc/build"
   ],
-  "idf.port": "COM4",
-  "cmake.sourceDirectory": "C:/Users/Duncan/Downloads/safmc/eth slam/combine"
+  "idf.port": "/dev/cu.usbmodem1101",
+  "cmake.sourceDirectory": "/Users/duncanlau/Downloads/safmc/combine_2"
 }

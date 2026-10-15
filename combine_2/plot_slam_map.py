@@ -22,7 +22,16 @@ import json
 import csv
 import threading
 from pathlib import Path
-import numpy as np
+try:
+    import numpy as np
+except ImportError:
+    # ESP-IDF's python env (active after get_idf) has no numpy/matplotlib:
+    # re-run with the repo's .venv (safmc/.venv) if it exists.
+    _venv = Path(__file__).resolve().parent.parent / ".venv"
+    _venv_py = _venv / "bin" / "python"
+    if _venv_py.exists() and Path(sys.prefix).resolve() != _venv.resolve():
+        os.execv(str(_venv_py), [str(_venv_py), __file__] + sys.argv[1:])
+    raise
 import matplotlib.pyplot as plt
 
 DATA_DIR = Path(__file__).parent / "laptop" / "data"
@@ -479,6 +488,17 @@ def get_clipboard_text():
     except Exception:
         return ""
 
+def default_port():
+    """COM4 on Windows; on macOS/Linux the first USB serial device found."""
+    if sys.platform == "win32":
+        return "COM4"
+    import glob
+    for pattern in ("/dev/cu.usbmodem*", "/dev/cu.usbserial*", "/dev/cu.SLAB*", "/dev/ttyACM*", "/dev/ttyUSB*"):
+        found = sorted(glob.glob(pattern))
+        if found:
+            return found[0]
+    return "/dev/cu.usbmodem1101"
+
 if __name__ == "__main__":
     output_filename = "image_test_1.2.png"
     show_gui = "--no-gui" not in sys.argv
@@ -490,9 +510,9 @@ if __name__ == "__main__":
         if idx + 1 < len(sys.argv):
             port = sys.argv[idx + 1]
         else:
-            port = "COM4"
+            port = default_port()
     elif "--live" in sys.argv:
-        port = "COM4"
+        port = default_port()
 
     if port:
         listen_serial(port=port, output_file=output_filename, show_gui=show_gui, show_points=show_points)

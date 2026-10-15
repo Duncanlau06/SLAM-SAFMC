@@ -68,7 +68,7 @@ void swarm_comm_fetch_scan(uint8_t addr, swarm_pose_id_t id) {
     tx_queue_item_t item = {
             .type = COMM_TX_QUEUE_ITEM_SCAN_REQ,
             .addr = addr,
-            .pose_id = id,
+            .pose_id = id, 
     };
     xQueueSend(tx_queue, &item, portMAX_DELAY);
     // Wait for scan to be returned with timeout (2 sec)
